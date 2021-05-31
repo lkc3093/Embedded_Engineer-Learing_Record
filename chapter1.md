@@ -1,8 +1,17 @@
 ##  API熟悉
+* **lamba匿名函数**
+````python
+
+a = lambda x, y: x + y # x,y相当于传入的参数,函数会返回x+y的值
+print(a(1,2)) # 打印出3
+
+````
 * **构建TVM算子**
 ```python
 A = te.placeholder((1024,), name='A') 
 # 创建变量
+k = te.reduce_axis((0, n), 'k')
+# 创建维度
 B = te.compute((1,), lambda i: te.sum(A[k], axis=k), name='B') 
 # 定义计算细节
 s = te.create_schedule(B.op)
@@ -61,3 +70,4 @@ print(resnet18_mod.astext(show_meta_data=False))
 
 print(resnet18_lib.get_source())
 ````
+
