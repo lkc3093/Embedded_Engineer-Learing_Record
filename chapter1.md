@@ -20,8 +20,11 @@ print(tvm.lower(s, [A, B], simple_mode=True))
 # 低级代码显示
 ```
 * **生成中间IR和后端编译代码**
+
   * 通过IRModule的astext函数可以查看中间IR
+
   * 通过运行时module的get_source查看生成的代码
+  
 ````python
 import tvm
 from tvm import te
@@ -49,7 +52,7 @@ print("tir:\n", ir_m.astext(show_meta_data=False))
 # 打印后端c代码
 print("source code:\n",rt_m.get_source())
 ````
-* **中间代码IR优化**
+* **后端调度优化**
 ````python
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -59,7 +62,7 @@ from tvm.relay import testing
 from tvm.contrib import util
 import tvm
 
-# Resnet18 
+# Resnet18 mod是计算图,params是参数模块,lib是算子
 resnet18_mod, resnet18_params = relay.testing.resnet.get_workload(num_layers=18)
 
 # 优化级别选择
@@ -70,4 +73,3 @@ print(resnet18_mod.astext(show_meta_data=False))
 
 print(resnet18_lib.get_source())
 ````
-
