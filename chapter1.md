@@ -73,3 +73,24 @@ print(resnet18_mod.astext(show_meta_data=False))
 
 print(resnet18_lib.get_source())
 ````
+* **图优化**
+````python
+def my_optimize(func,params=None):
+
+    if params:
+        graph = _bind_params(func, params)
+
+    # https://docs.tvm.ai/api/python/relay/transform.html
+    optimize = relay.transform.Sequential([relay.transform.SimplifyInference(),
+                                      relay.transform.FoldConstant(),
+                                      relay.transform.FoldScaleAxis(),
+                                      relay.transform.CanonicalizeOps(),
+                                      relay.transform.FoldConstant()])
+
+    mod = relay.Module.from_expr(graph)
+    mod = optimize(mod)
+    return mod["main"]
+
+mod['main'] = my_optimize(mod['main'], params)
+print("Relay module function:\n", mod.astext(show_meta_data=False))
+````
