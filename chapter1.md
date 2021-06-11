@@ -82,7 +82,7 @@ def my_optimize(func,params=None):
 
     # https://docs.tvm.ai/api/python/relay/transform.html
     optimize = relay.transform.Sequential([relay.transform.SimplifyInference(),
-                                      relay.transform.FoldConstant(),
+                                      relay.transform.FoldConstant(),# 常量折叠
                                       relay.transform.FoldScaleAxis(),
                                       relay.transform.CanonicalizeOps(),
                                       relay.transform.FoldConstant()])
