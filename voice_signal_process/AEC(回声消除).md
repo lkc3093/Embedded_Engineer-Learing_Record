@@ -68,5 +68,4 @@ end
 
 ### 参考链接
 https://www.jianshu.com/p/f2fc2ff2d70d ( **介绍speex的aec流程** )  
-&nbsp;
-https://www.cnblogs.com/LXP-Never/p/11887511.html ( **matlab实现AEC中的自适应滤波** )
+&nbsp;  https://www.cnblogs.com/LXP-Never/p/11887511.html ( **matlab实现AEC中的自适应滤波** )
