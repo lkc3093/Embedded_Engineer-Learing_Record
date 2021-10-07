@@ -67,5 +67,6 @@ end
 2. 因为复数的乘法计算, 等于实部*实部+虚部*虚部+2*实部*虚部, 而单位圆上的第一象限与第二象限的实部为相反数; 利用这个性质可以计算出后续频谱的数值
 
 ### 参考链接
-https://www.jianshu.com/p/f2fc2ff2d70d ( **介绍speex的aec流程** )  
-&nbsp;  https://www.cnblogs.com/LXP-Never/p/11887511.html ( **matlab实现AEC中的自适应滤波** )
+ https://www.jianshu.com/p/f2fc2ff2d70d ( **介绍speex的aec流程** )  
+&nbsp;  
+https://www.cnblogs.com/LXP-Never/p/11887511.html ( **matlab实现AEC中的自适应滤波** )

@@ -15,4 +15,7 @@
 * Denoise(降噪算法) 
 &nbsp;
 * AGC(人声增益)
+* OPUS(音频编码)
+* SBC(蓝牙音频编码)
+* LC3plus(蓝牙音频编码)
 
