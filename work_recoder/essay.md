@@ -15,23 +15,62 @@
   * *CFSMN* 将前一刻的feature降维了，减少参数；并只输出记忆模块参数
   * *DFSMN* 增加了跳跃输入，类似于resnet
 
+------
+
+
+
 ## **算法优化**
 * 深度可分离卷积，每个通道单独卷积，然后多个通道逐点点积
   * *MobileNet*
+  
 * 算子融合，前一个计算图的结果是后一个计算图的输入，可以融合，减少数据的 *load*，*store* 的操作
   * 可以通过 *tvm* 前端来实现
+  
 * 通过加 *L2* 正则，将输入的权重稀疏化，节省内存
   * 稀疏矩阵可以只访问非0值部分，减少指令读取的执行
+  
 * 向量指令加速
   * 内联，减少函数跳转，和堆栈开辟
   * 指令并行，无数据冲突的指令流水线执行
   * VILW，相当于多发射，指令槽
+  
 * 异构多核
   * 完成会报中断，类似于线程同步
+  
 * 量化
   * 定点数，int8
   * tensorflow训练中量化
   * 非对称量化更好
+  
+  ------
+
+
+
+## TVM
+
+### FrontEnd
+
+  支持主流的深度学习前端框架，包括TensorFlow, MXNet, PyTorch, Keras, CNTK。目前TVM可以继承到PyTorch框架中优化、训练，而不是单纯地调用CNN模型接口
+
+### Relay
+
+  根据具体硬件对原始计算图进行重构、张量优化、数据重排等图优化操作。源代码分析中，Relay层比较杂，干的事情比较多，既对接上层的图优化又对接硬件的调度器
+
+
+
+
+![img](https://iostream.io/wp-content/uploads/2019/09/Relay.png)![img](https://iostream.io/wp-content/uploads/2019/09/Tensorlization.png)
+
+
+
+Relay及Tensorlization示例
+
+### BackEnd
+
+后端支持ARM、CUDA/Metal/OpenCL及加速器VTA。
+
+1. 生成硬件所需指令流与数据打包
+2. 一个CPU与VTA的交互式运行环境：包括driver、JIT。
 
 ## RTOS
 * 线程切换类似于中断中的上下文保护
@@ -50,16 +89,17 @@
     * 有序执行 (in-order execution)：命令按其在命令队列中出现的顺序发出，并按顺序完成。队列中前一个命令完成之后，下一个命令才会开始。这会将队列中命令的执行顺序串行化
     * 乱序执行 (out-of-order execution)：命令按顺序发出，但是下一个命令执行之前不会等待前一个命令完成。程序员要通过显式的同步机制来强制顺序约束
   
-* **work-item**（工作项）：**work-item** 与 **cuda threads** 是一样的，是最小的执行单元。每次一个Kernel开始执行，很多（程序员定义数量）的**work-item**就开始运行，每个都执行同样的代码
-  * 每个**work-item**有一个 id ，这个 id 在 kernel 中是可以访问的，每个运行在 **work-item **上的 kernel 通过这个 id 来找出**work-item**需要处理的数据
+* **work-item**（工作项）：**work-item** 与 **cuda threads** 是一样的，是最小的执行单元。每次一个Kernel开始执行，很多（程序员定义数量）的 **work-item** 就开始运行，每个都执行同样的代码
+  
+  * 每个 **work-item** 有一个 id ，这个 id 在 kernel 中是可以访问的，每个运行在 **work-item **上的 kernel 通过这个 id 来找出**work-item**需要处理的数据
   * **work-item** 是循环中的最小单位
-  * 
+  * **work-item** 应该是由opencl自动分配给硬件线程的
   
 * 存储器模式是软件定义的，而非单纯硬件实现；可以使用`constant` 来将数据放入常量存储区，访问更快；
 
 * kernel函数中间可以嵌套kernel函数，设备端可以创建命令队列，极大地方便了代码编写
 
-  
+  > 
 
   ````c
   #include <iostream>
@@ -88,7 +128,7 @@
    
   }
                                  );
-   
+  
   int main(int argc, char const *argv[])
   {
       printf("hello OpenCL\n");
@@ -198,7 +238,6 @@
           return EXIT_FAILURE;
       }
    
-   
       //  为内核程序设置参数
       status = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&outputBuffer);
       if (status != CL_SUCCESS) {
@@ -266,4 +305,12 @@
   }
   ````
 
-  
+
+
+## 算力评估
+
+* FLOPS的计算公式如下
+
+```text
+浮点运算能力 = 处理器核数 * 每周期浮点运算次数 * 处理器主频
+```
