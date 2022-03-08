@@ -395,6 +395,23 @@
 
     按惯例，像这类性能这么好的memory都是有限制的，shared memory是以block为单位分配的；我们必须非常小心的使用shared memory，否则会无意识的限制了active warp的数目
 
+    * 要解决bank冲突，首先我们要了解一下共享内存的地址映射方式。
+      在共享内存中，连续的32-bits字被分配到连续的32个bank中，这就像电影院的座位一样：一列的座位就相当于一个bank，所以每行有32个座位，在每个座位上可以“坐”一个32-bits的数据(或者多个小于32-bits的数据，如4个`char`型的数据，2个`short`型的数据)；而正常情况下，我们是按照先坐完一行再坐下一行的顺序来坐座位的，在shared memory中地址映射的方式也是这样的。下图中内存地址是按照箭头的方向依次映射的：
+
+      
+
+      ![bank-layout](https://segmentfault.com/img/bVFMd3)
+
+      
+
+      上图中数字为bank编号。这样的话，如果你将申请一个共享内存数组(假设是int类型)的话，那么你的每个元素所对应的bank编号就是地址偏移量(也就是数组下标)对32取余所得的结果，比如大小为1024的一维数组myShMem:
+
+      - myShMem[4]: 对应的bank id为#4 (相应的行偏移量为0)
+      - myShMem[31]: 对应的bank id为#31 (相应的行偏移量为0)
+      - myShMem[50]: 对应的bank id为#18 (相应的行偏移量为1)
+      - myShMem[128]: 对应的bank id为#0 (相应的行偏移量为4)
+      - myShMem[178]: 对应的bank id为#18 (相应的行偏移量为5)
+
   * **Constant Memory**
 
     常量内存同样是offchip内存，只读，拥有SM私有的 **constant cache**，因此在cache hit的情况下速度快。常量内存是全局的，对所有 Kernel 函数可见。因此声明要在Kernel函数外
@@ -414,6 +431,50 @@
 
 * 当 block 中的线程数超过 SM 的上限，会导致 kernel 不运行；目前英伟达官方将块的上限设置为1024个线程
 * 通过 **stream** 可以实现多个内核计算并行，或者计算与IO并行；流与流之间是并发关系，类似于**opencl** 中的命令队列( 乱序 )
+
+------
+
+> 指令执行吞吐一般指的是每个时钟周期内可以执行的指令数目，不同指令的吞吐会有所不同。通常GPU的指令吞吐用每个SM每周期可以执行多少指令来计量。对于多数算术逻辑指令而言，指令执行吞吐只与SM内的单元有关，整个GPU的吞吐就是每个SM的吞吐乘以SM的数目。而GPU的FMA指令（通常以F32计算）往往具有最高的指令吞吐，其他指令吞吐可能与FMA吞吐一样，或是只有一半、四分之一等等。所以很多英文文档会说FMA这种是full throughput，一半吞吐的是half rate，四分之一的是quarter rate等。当然，有些微架构下也会有1/3、1/6之类非2的幂次的比率
+
+* 指令吞吐不仅与指令类型有关，还与微架构具体设计实现有关。它主要会受到以下一些因素的影响：
+
+  1. **功能单元**的数目。绝大多数指令的功能都需要专用或共享的硬件资源去实现，设计上配置的功能单元多，指令执行的吞吐才可能大。显然，只有最常用的那些指令，才能得到最充分的硬件资源。而为了节约面积，很多指令的功能单元会相互共享，所以他们的吞吐往往也会趋于一致。比如浮点的FFMA、FMUL都要用到一个至少24bit的整数乘法器（32bit浮点数有23bit尾数，小数点前还有1bit）。以前一些处理器有24bit的整数乘法指令，两者乘法器就可以共用，从而具有相同的吞吐（不过NV最近几代好像都没有这个指令，ptx以及内置函数的24bit乘法应该是多个指令模拟的）。而FADD虽然用不上那个乘法器，但可以与FFMA共用那个很宽的加法器，以及一些通用的浮点操作（特殊数的处理，subnormal flush之类）。32bit的整数乘法因为需要更宽的乘法器，有的就不会做成full throughput，甚至可能被拆分成多个指令（比如Maxwell和Pascal用三个16bit乘法指令XMAD完成一次32bit整数乘法）。Turing的
+
+     IMAD应该是有意识的加宽了，所以32bit的IMAD与FFMA吞吐一样，但印象中带64bit加数的IMAD应该还是一半。再比如一些超越函数指令（MUFU类，比如rcp，rsq，sin，exp之类），由于实际使用量相对不会太频繁，多数是1/4的throughput
+
+     
+
+  2. 指令 **Dispatch Port** 和 **Dispatch Unit** 的吞吐。这个在之前的专栏文章也详细讲过。一个warp的指令要发射，**首先要eligible**，也就是不要因为各种原因stall，比如指令cache miss，constant immediate的miss，scoreboard未就位，主动设置了stall count等等。**其次要被warp scheduler选中**，由Dispatch Unit发送到相应的Dispatch Port上去。Kepler、Maxwell和Pascal是一个Warp Scheduler有两个Dispatch Unit，所以每cycle最多可以发射两个指令，也就是双发射。而Turing、Ampere每个Warp Scheduler只有一个Dispatch Unit，没有双发射，那每个周期就最多只能发一个指令。但是Kepler、Maxwell和Pascal都是一个Scheduler带32个单元（这里指full-throughput的单元），每周期都可以发新的warp。而Turing、Ampere是一个Scheduler带16个单元，每个指令要发两cycle，从而空出另一个cycle给别的指令用。**最后要求Dispatch Port或其他资源不被占用**，port被占的原因可能是前一个指令的执行吞吐小于发射吞吐，导致要Dispatch多次，比如Turing的两个FFMA至少要stall 2cycle，LDG之类的指令至少是4cycle。更详细的介绍大家可以参考之前的专栏文章
+
+     
+
+  3. **GPR读写吞吐**。绝大部分的指令都要涉及GPR的读写，由于Register File每个bank每个cycle的吞吐是有限的（一般是32bit），如果一个指令读取的GPR过多或是GPR之间有bank conflict，都会导致指令吞吐受影响。GPR的吞吐设计是影响指令发射的重要原因之一，有的时候甚至占主导地位，功能单元的数目配置会根据它和指令集功能的设计来定。比如NV常用的配置是4个Bank，每个bank每个周期可以输出一个32bit的GPR。这样FFMA这种指令就是3输入1输出，在没有bank conflict的时候可以一个cycle读完。其他如DFMA、HFMA2指令也会根据实际的输入输出需求，进行功能单元的配置
+
+     
+
+  4. 很多指令有**replay**的逻辑（[参考Greg Smith在StackOverflow上的一个回答](http://link.zhihu.com/?target=https%3A//stackoverflow.com/questions/35566178/how-to-explain-instruction-replay-in-cuda)）。这就意味着有的指令一次发射可能不够。这并不是之前提过的由于功能单元少而连续占用多轮dispath port，而是指令处理的逻辑上有需要分批或是多次处理的部分。比如constant memory做立即数时的cache miss，memory load时的地址分散，shared memory的bank conflict，atomic的地址conflict，甚至是普通的cache miss或是TLB的miss之类。根据上面Greg的介绍，Maxwell之前，这些replay都是在warp scheduler里做的，maxwell开始将它们下放到了各级功能单元，从而节约最上层的发射吞吐。不过，只要有replay，相应dispath port的占用应该是必然的，这样同类指令的总发射和执行吞吐自然也就会受影响
+
+* **静态资源分配**
+
+  * GPU有一个很重要的设计逻辑是尽量减少硬件需要动态判断的部分。GPU的每个线程和block运行所需的资源尽量在编译期就确定好，在每个block运行开始前就分配完成（Block是GPU进行运行资源分配的单元，也是计算Occupancy的基础）。典型的运行资源有GPR和shared memory。GPU程序运行过程中，一般也不会申请和释放内存（当然，现在有device runtime可以在kernel内malloc和free，供Dynamic Parallelism用，但这个不影响当前kernel能用的资源）。CPU在运行过程中有很多所需的资源是动态调度的。比如，x86由于继承了祖上编码的限制，ISA的GPR数目往往比物理GPR少，导致常常出现资源冲突造成假依赖。实际运行过程中，通常会有register renaming将这些ISA GPR映射到不同的物理GPR，从而减少依赖（有兴趣的同学可以研究下tomasulo算法）。GPU没有这种动态映射逻辑，每个线程的GPR将一一映射到物理GPR。由于每个线程能用的GPR通常较多，加上编译器的指令调度优化，这种假依赖对性能的影响通常可以降到很低的程度
+
+    
+
+    每个block在运行前还会分配相应的shared memory，这也是静态的。这里需要明确的是，每个block的shared memory包括两部分，写kernel时固定长度的静态shared memory，以及启动kernel时才指定大小的动态shared memory。虽然这里也分动静态，但指的是编译期是否确定大小，在运行时总大小在kernel启动时已经确定了，kernel运行过程中是不能改变的
+
+    
+
+    其实block还有一些静态资源，比如用来做block同步的barrier，每个block最多可以有16个。我暂时没测试到barrier的数目对Occupancy的影响，也许每个block都可以用16个。另一种是Turing后才出现的warp内的标量寄存器Uniform Register，每个warp 63个+恒零的URZ。因为每个warp都可以分配到足额，应该对Occupancy也没有影响。另外每个线程有7个predicate，每个warp有7个Uniform predicate，这些也是足额，也不影响Occupancy
+
+    
+
+    GPU里还有一种半静态的stack资源，通常也可以认为是thread private memory或者叫local memory。多数情况下每个线程会用多少local memory也是确定的。不过，如果出现一些把local memory当stack使用的复杂递归操作，可能造成local memory的大小在编译期未知。这种情况编译器会报warning，但是也能运行。不过local memory有最大尺寸限制，当前是每个线程最多512KB（参考[CUDA C Programming Guide, Table 15](http://link.zhihu.com/?target=https%3A//docs.nvidia.com/cuda/cuda-c-programming-guide/index.html%23features-and-technical-specifications__technical-specifications-per-compute-capability), Maximum amount of local memory per thread=512KB）
+
+  * **顺序执行**：乱序执行是CPU提高CPI的一个重要途径，但乱序执行无论是设计复杂度还是运行控制的开销都很大。CPU的乱序执行可以把一些不相关的任务提前（相关的也可以乱序，但要求顺序提交），从而提高指令并行度，降低延迟。而GPU主要通过Warp切换的逻辑保持功能单元的吞吐处于高效利用状态，这样总体性能对单个warp内是否stall就不太敏感
+
+    虽然GPU一般是顺序执行，但指令之间不相互依赖的时候，可以连续发射而不用等待前一条指令完成。在理想的情况下，一个warp就可以把指令吞吐用满。当然，实际程序还是会不可避免出现stall（比如branch），这时就需要靠TLP来隐藏这部分延迟
+
+------
 
 ### Kernel Parallel
 
@@ -641,8 +702,6 @@ nt main(int argc, char **argv)
     // release all stream
     for (int i = 0 ; i < n_streams ; i++)
     {
-    
-      
         CHECK(cudaStreamDestroy(streams[i]));
     }
 
@@ -666,9 +725,7 @@ nt main(int argc, char **argv)
 ### 思考
 
 - 在根据《CUDA C编程权威指南》提供的源码进行复现的时候，始终无法得到上述的结果，折腾两天后发现原来的源码中核函数没有输入和输出，这样在编译器优化的时候，直接不予计算了，所以怎么测都有问题，调整后就可以得到上述结果。
-- 当每个kernel启动的时候，grid和block的值都设置的很大的时候，并行的情况也不好，因为单个kernel执行的时候已经把计算资源用的差不多了，所以有时候资源调度器直接放弃取下个任务了。
-
-
+- 当每个kernel启动的时候，**grid** 和 **block** 的值都设置的很大的时候，并行的情况也不好，因为单个kernel执行的时候已经把计算资源用的差不多了，所以有时候资源调度器直接放弃取下个任务了。
 
 ## 算力评估
 
